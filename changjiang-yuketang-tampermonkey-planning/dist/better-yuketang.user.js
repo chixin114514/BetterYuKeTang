@@ -699,7 +699,7 @@
     });
 
     root.querySelector('[data-action="clear-logs"]').addEventListener("click", () => {
-      clearLogs(settings, logger, context);
+      clearLogs(settings, logger, context, courseSnapshot);
     });
 
     root.querySelector('[data-action="refresh"]').addEventListener("click", () => {
@@ -763,9 +763,8 @@
     };
   }
 
-  function clearLogs(settings, logger, context) {
+  function clearLogs(settings, logger, context, courseSnapshot) {
     runtimeState.logs = [];
-    const courseSnapshot = collectPageData(context, logger);
     renderPanel({ context, settings, logger, courseSnapshot });
   }
 
