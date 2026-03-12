@@ -292,6 +292,17 @@
     return "unknown";
   }
 
+  function summarizeFetchResult(htmlText) {
+    const text = getCleanText(
+      String(htmlText || "")
+        .replace(/<script[\s\S]*?<\/script>/gi, " ")
+        .replace(/<style[\s\S]*?<\/style>/gi, " ")
+        .replace(/<[^>]+>/g, " ")
+    );
+
+    return text.slice(0, 240);
+  }
+
   async function inspectCourse(course, logger) {
     if (!course.href) {
       logger.error("Skip course inspection because href is missing", {
@@ -320,6 +331,12 @@
 
       const html = await response.text();
       const status = detectCourseAvailability(html);
+      logger.info("Fetch result summary", {
+        courseName: course.courseName,
+        responseStatus: response.status,
+        contentStatus: status,
+        preview: summarizeFetchResult(html)
+      });
       logger.info("Inspected course content", {
         courseName: course.courseName,
         status
