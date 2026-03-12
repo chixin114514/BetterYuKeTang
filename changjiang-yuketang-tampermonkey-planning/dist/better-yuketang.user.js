@@ -660,6 +660,9 @@
             </ul>
           </section>
           <div class="byt-actions">
+            <button class="byt-button" data-action="clear-logs" data-variant="secondary">
+              清空日志
+            </button>
             <button class="byt-button" data-action="inspect-courses" data-variant="secondary">
               静默查询
             </button>
@@ -693,6 +696,10 @@
 
     root.querySelector('[data-action="inspect-courses"]').addEventListener("click", () => {
       runManualCourseInspection(logger);
+    });
+
+    root.querySelector('[data-action="clear-logs"]').addEventListener("click", () => {
+      clearLogs(settings, logger, context);
     });
 
     root.querySelector('[data-action="refresh"]').addEventListener("click", () => {
@@ -754,6 +761,12 @@
       courses,
       message: ""
     };
+  }
+
+  function clearLogs(settings, logger, context) {
+    runtimeState.logs = [];
+    const courseSnapshot = collectPageData(context, logger);
+    renderPanel({ context, settings, logger, courseSnapshot });
   }
 
   function runManualCourseInspection(logger) {
