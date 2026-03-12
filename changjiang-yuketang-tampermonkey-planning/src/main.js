@@ -146,31 +146,6 @@
       .replace(/'/g, "&#39;");
   }
 
-  function inferTeacherFromText(text, courseName) {
-    const normalizedText = getCleanText(text);
-    if (!normalizedText) {
-      return "";
-    }
-
-    const segments = normalizedText
-      .split(/\n|[|｜/]/)
-      .map((segment) => getCleanText(segment))
-      .filter(Boolean);
-
-    const teacherSegment = segments.find((segment) => {
-      return (
-        segment !== courseName &&
-        !/我的课程|我听的课|课程|班级|进入|继续学习|开课|学期|课程班/.test(segment)
-      );
-    });
-
-    if (!teacherSegment) {
-      return "";
-    }
-
-    return teacherSegment.replace(/^(授课教师|教师|老师|主讲教师|主讲)\s*[:：]?\s*/i, "");
-  }
-
   function isVisibleElement(element) {
     if (!element || !(element instanceof HTMLElement)) {
       return false;
@@ -221,7 +196,6 @@
       textLines.find((line) => line !== rawCourseName && /春|秋|班|学院|专业|临班|\d{4}/.test(line)) ||
       textLines.find((line) => line !== rawCourseName) ||
       "";
-    const teacher = inferTeacherFromText(card.textContent, courseName);
 
     if (!courseName || courseName.length < 2) {
       return null;
@@ -229,8 +203,7 @@
 
     return {
       courseName,
-      classInfo,
-      teacher: teacher || ""
+      classInfo
     };
   }
 
@@ -262,7 +235,7 @@
     const courses = candidates
       .map((card) => resolveCourseInfoFromCard(card))
       .filter(Boolean)
-      .filter((item) => item.classInfo || item.teacher);
+      .filter((item) => item.classInfo);
 
     logger.debug("Parsed course count", { count: courses.length });
 
@@ -493,7 +466,7 @@
                           `<li>
                             ${escapeHtml(item.courseName)}
                             <span class="byt-meta">${escapeHtml(
-                              item.teacher || item.classInfo || "未识别到教师或班级信息"
+                              item.classInfo || "未识别到班级信息"
                             )}</span>
                           </li>`
                       )
@@ -590,13 +563,6 @@
         courses,
         message: "暂未识别到“我听的课”列表，可能需要等页面内容加载完成"
       };
-    }
-
-    const missingTeacherCount = courses.filter((item) => !item.teacher).length;
-    if (missingTeacherCount) {
-      logger.info("Teacher info is not visible on the current page cards", {
-        missingTeacherCount
-      });
     }
 
     return {
