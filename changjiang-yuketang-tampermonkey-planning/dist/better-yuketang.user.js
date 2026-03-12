@@ -447,11 +447,6 @@
       document.body.append(root);
     }
 
-    const enabledModules = [
-      settings.enableCourseDashboard ? "课程看板" : null,
-      settings.enablePptHelper ? "PPT 辅助" : null,
-      settings.enableExportHelper ? "导出辅助" : null
-    ].filter(Boolean);
     const logItems = runtimeState.logs
       .slice(-12)
       .reverse()
@@ -485,16 +480,6 @@
             页面识别结果：<strong>${context.pageType}</strong><br />
             识别置信度：<strong>${context.confidence}</strong>
           </div>
-          <section class="byt-section">
-            <h3>已启用模块</h3>
-            <ul class="byt-list">
-              ${
-                enabledModules.length
-                  ? enabledModules.map((item) => `<li>${item}</li>`).join("")
-                  : "<li>暂无启用模块</li>"
-              }
-            </ul>
-          </section>
           ${
             context.pageType === "course-list"
               ? `
@@ -525,9 +510,13 @@
           }
           <section class="byt-section">
             <h3>运行日志</h3>
-            <ul class="byt-log-list">
+            ${
+              settings.showLogs
+                ? `<ul class="byt-log-list">
               ${logItems || "<li class=\"byt-log-item\">暂无日志</li>"}
-            </ul>
+            </ul>`
+                : '<div class="byt-meta">日志已隐藏</div>'
+            }
           </section>
           <section class="byt-section">
             <h3>下一步接入点</h3>
@@ -538,6 +527,9 @@
             </ul>
           </section>
           <div class="byt-actions">
+            <button class="byt-button" data-action="toggle-logs" data-variant="secondary">
+              ${settings.showLogs ? "隐藏日志" : "显示日志"}
+            </button>
             <button class="byt-button" data-action="toggle-debug">
               ${settings.debug ? "关闭调试" : "开启调试"}
             </button>
@@ -553,6 +545,13 @@
       const nextSettings = { ...settings, debug: !settings.debug };
       persistence.set(nextSettings);
       logger.info("Updated debug setting", nextSettings);
+      start();
+    });
+
+    root.querySelector('[data-action="toggle-logs"]').addEventListener("click", () => {
+      const nextSettings = { ...settings, showLogs: !settings.showLogs };
+      persistence.set(nextSettings);
+      logger.info("Updated log visibility", { showLogs: nextSettings.showLogs });
       start();
     });
 
@@ -582,6 +581,7 @@
 
   const defaults = {
     debug: false,
+    showLogs: true,
     enableCourseDashboard: true,
     enablePptHelper: true,
     enableExportHelper: true
