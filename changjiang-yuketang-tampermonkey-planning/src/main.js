@@ -239,7 +239,7 @@
 
     logger.debug("Parsed course count", { count: courses.length });
 
-    return uniqueBy(courses, (item) => `${item.courseName}::${item.classInfo}`);
+    return uniqueBy(courses, (item) => item.courseName);
   }
 
   function injectStyles() {
