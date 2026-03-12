@@ -18,7 +18,9 @@
   const STORAGE_KEY = "better-yuketang:settings";
   const MAX_LOG_ENTRIES = 80;
   const runtimeState = {
-    logs: []
+    logs: [],
+    inspectionRunId: 0,
+    courseStatuses: {}
   };
 
   function createStorage() {
@@ -138,18 +140,6 @@
     return result;
   }
 
-  function findText(root, selectors) {
-    for (const selector of selectors) {
-      const element = root.querySelector(selector);
-      const text = getCleanText(element && element.textContent);
-      if (text) {
-        return text;
-      }
-    }
-
-    return "";
-  }
-
   function escapeHtml(value) {
     return String(value || "")
       .replace(/&/g, "&amp;")
@@ -244,9 +234,16 @@
       return null;
     }
 
+    const linkElement =
+      (card.matches("a[href]") ? card : null) ||
+      card.querySelector("a[href]") ||
+      card.closest("a[href]");
+    const href = linkElement ? linkElement.href : "";
+
     return {
       courseName,
-      classInfo
+      classInfo,
+      href
     };
   }
 
@@ -283,6 +280,107 @@
     logger.debug("Parsed course count", { count: courses.length });
 
     return uniqueBy(courses, (item) => getCourseDedupKey(item.courseName));
+  }
+
+  function getCourseStatusKey(course) {
+    return course.href || getCourseDedupKey(course.courseName);
+  }
+
+  function getCourseStatus(course) {
+    return runtimeState.courseStatuses[getCourseStatusKey(course)] || "pending";
+  }
+
+  function detectCourseAvailability(htmlText) {
+    const html = String(htmlText || "");
+    const normalized = html.replace(/\s+/g, "");
+
+    if (/老师没有发布学习内容/.test(html) || normalized.includes("老师没有发布学习内容")) {
+      return "empty";
+    }
+
+    if (/学习内容|章节|课件|作业|讨论区|公告|分组|成绩单/.test(html)) {
+      return "has-content";
+    }
+
+    return "unknown";
+  }
+
+  async function inspectCourse(course, logger) {
+    if (!course.href) {
+      logger.error("Skip course inspection because href is missing", {
+        courseName: course.courseName
+      });
+      return "unknown";
+    }
+
+    logger.info("Inspecting course content", {
+      courseName: course.courseName,
+      href: course.href
+    });
+
+    try {
+      const response = await fetch(course.href, {
+        credentials: "include"
+      });
+
+      if (!response.ok) {
+        logger.error("Failed to inspect course page", {
+          courseName: course.courseName,
+          status: response.status
+        });
+        return "unknown";
+      }
+
+      const html = await response.text();
+      const status = detectCourseAvailability(html);
+      logger.info("Inspected course content", {
+        courseName: course.courseName,
+        status
+      });
+      return status;
+    } catch (error) {
+      logger.error("Course inspection request failed", {
+        courseName: course.courseName,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return "unknown";
+    }
+  }
+
+  async function inspectCourses({ courses, logger, settings, context }) {
+    const runId = Date.now();
+    runtimeState.inspectionRunId = runId;
+
+    const inspectableCourses = courses.filter((course) => course.href);
+    logger.info("Start background course inspection", {
+      count: inspectableCourses.length
+    });
+
+    for (const course of inspectableCourses) {
+      const status = await inspectCourse(course, logger);
+
+      if (runtimeState.inspectionRunId !== runId) {
+        logger.info("Discard stale inspection result", {
+          courseName: course.courseName
+        });
+        return;
+      }
+
+      runtimeState.courseStatuses[getCourseStatusKey(course)] = status;
+      renderPanel({
+        context,
+        settings,
+        logger,
+        courseSnapshot: {
+          courses,
+          message: ""
+        }
+      });
+    }
+
+    logger.info("Finished background course inspection", {
+      count: inspectableCourses.length
+    });
   }
 
   function injectStyles() {
@@ -371,6 +469,22 @@
         margin-top: 2px;
         font-size: 12px;
         color: #64748b;
+      }
+
+      .byt-course-item[data-status="has-content"] {
+        color: #b91c1c;
+      }
+
+      .byt-course-item[data-status="empty"] {
+        color: #94a3b8;
+      }
+
+      .byt-course-item[data-status="unknown"] {
+        color: #a16207;
+      }
+
+      .byt-course-item[data-status="pending"] {
+        color: #334155;
       }
 
       .byt-log-list {
@@ -489,17 +603,18 @@
               ${
                 courseSnapshot.courses.length
                   ? courseSnapshot.courses
-                      .map(
-                        (item) =>
-                          `<li>
+                      .map((item) => {
+                        const status = getCourseStatus(item);
+
+                        return `<li class="byt-course-item" data-status="${escapeHtml(status)}">
                             ${escapeHtml(item.courseName)}
                             ${
                               item.classInfo
                                 ? `<span class="byt-meta">${escapeHtml(item.classInfo)}</span>`
                                 : ""
                             }
-                          </li>`
-                      )
+                          </li>`;
+                      })
                       .join("")
                   : `<li>${escapeHtml(courseSnapshot.message)}</li>`
               }
@@ -620,6 +735,7 @@
     const settings = { ...defaults, ...persistence.get(defaults) };
     const logger = createLogger(settings.debug);
     const context = detectPageContext(window.location.href, document.title);
+    runtimeState.inspectionRunId += 1;
     logger.info("Bootstrapping userscript", {
       url: window.location.href,
       title: document.title,
@@ -629,6 +745,10 @@
     const courseSnapshot = collectPageData(context, logger);
     injectStyles();
     renderPanel({ context, settings, logger, courseSnapshot });
+
+    if (context.pageType === "course-list" && courseSnapshot.courses.length) {
+      inspectCourses({ courses: courseSnapshot.courses, logger, settings, context });
+    }
   }
 
   if (document.readyState === "loading") {
