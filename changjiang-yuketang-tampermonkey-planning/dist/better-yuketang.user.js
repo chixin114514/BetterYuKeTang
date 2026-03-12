@@ -17,7 +17,7 @@
   const VERSION = "0.1.0";
   const STORAGE_KEY = "better-yuketang:settings";
   const MAX_LOG_ENTRIES = 80;
-  const INITIAL_START_DELAY_MS = 5000;
+  const INITIAL_START_DELAY_MS = 1000;
   const runtimeState = {
     logs: [],
     inspectionRunId: 0,
