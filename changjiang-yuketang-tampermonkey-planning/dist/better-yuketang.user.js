@@ -210,17 +210,29 @@
       .filter((text) => !/^\.\.\.$|搜索课程|我的课|我的归档$/.test(text));
   }
 
+  function normalizeCourseName(value) {
+    const text = getCleanText(value).replace(/\s*归档$/, "");
+    const semesterMatch = text.match(/^(.*?\d{4}[春秋])(?:-.+)?$/);
+
+    if (semesterMatch) {
+      return getCleanText(semesterMatch[1]);
+    }
+
+    return text;
+  }
+
   function resolveCourseInfoFromCard(card) {
     const textLines = extractTextLinesFromCard(card);
     if (!textLines.length) {
       return null;
     }
 
-    const courseName =
+    const rawCourseName =
       textLines.find((line) => line.length >= 4 && !/^\d{4}[春秋]-/.test(line)) || textLines[0];
+    const courseName = normalizeCourseName(rawCourseName);
     const classInfo =
-      textLines.find((line) => line !== courseName && /春|秋|班|学院|专业|临班|\d{4}/.test(line)) ||
-      textLines.find((line) => line !== courseName) ||
+      textLines.find((line) => line !== rawCourseName && /春|秋|班|学院|专业|临班|\d{4}/.test(line)) ||
+      textLines.find((line) => line !== rawCourseName) ||
       "";
     const teacher = inferTeacherFromText(card.textContent, courseName);
 
