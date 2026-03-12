@@ -647,6 +647,9 @@
             </ul>
           </section>
           <div class="byt-actions">
+            <button class="byt-button" data-action="inspect-courses" data-variant="secondary">
+              静默查询
+            </button>
             <button class="byt-button" data-action="toggle-logs" data-variant="secondary">
               ${settings.showLogs ? "隐藏日志" : "显示日志"}
             </button>
@@ -673,6 +676,10 @@
       persistence.set(nextSettings);
       logger.info("Updated log visibility", { showLogs: nextSettings.showLogs });
       start();
+    });
+
+    root.querySelector('[data-action="inspect-courses"]').addEventListener("click", () => {
+      runManualCourseInspection(logger);
     });
 
     root.querySelector('[data-action="refresh"]').addEventListener("click", () => {
@@ -734,6 +741,29 @@
       courses,
       message: ""
     };
+  }
+
+  function runManualCourseInspection(logger) {
+    const settings = { ...defaults, ...persistence.get(defaults) };
+    const context = detectPageContext(window.location.href, document.title);
+
+    if (context.pageType !== "course-list") {
+      logger.info("Skip manual course inspection: current page is not a course list page");
+      return;
+    }
+
+    const courseSnapshot = collectPageData(context, logger);
+    renderPanel({ context, settings, logger, courseSnapshot });
+
+    if (!courseSnapshot.courses.length) {
+      logger.error("Skip manual course inspection: no courses were extracted");
+      return;
+    }
+
+    logger.info("Manual background course inspection requested", {
+      count: courseSnapshot.courses.length
+    });
+    inspectCourses({ courses: courseSnapshot.courses, logger, settings, context });
   }
 
   function start() {
