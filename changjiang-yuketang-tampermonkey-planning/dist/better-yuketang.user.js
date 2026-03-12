@@ -176,6 +176,11 @@
       .filter((text) => !/^\.\.\.$|搜索课程|我的课|我的归档$/.test(text));
   }
 
+  function shouldIgnoreCourseName(value) {
+    const text = getCleanText(value);
+    return !text || text.length < 2 || /搜索课程|教学管理|我的课|我的归档/.test(text);
+  }
+
   function normalizeCourseName(value) {
     const text = getCleanText(value).replace(/\s*归档$/, "");
     const semesterMatch = text.match(/^(.*?\d{4}[春秋])(?:-.+)?$/);
@@ -214,6 +219,136 @@
     }
 
     return text;
+  }
+
+  function walkSourceTree(root, visit, options = {}) {
+    const { maxNodes = 4000 } = options;
+    const queue = [root];
+    const seen = new WeakSet();
+    let visitedCount = 0;
+
+    while (queue.length && visitedCount < maxNodes) {
+      const current = queue.shift();
+      if (!current || typeof current !== "object") {
+        continue;
+      }
+
+      if (seen.has(current)) {
+        continue;
+      }
+
+      seen.add(current);
+      visitedCount += 1;
+      visit(current);
+
+      if (Array.isArray(current)) {
+        current.forEach((item) => {
+          if (item && typeof item === "object") {
+            queue.push(item);
+          }
+        });
+        continue;
+      }
+
+      Object.keys(current).forEach((key) => {
+        const value = current[key];
+        if (value && typeof value === "object") {
+          queue.push(value);
+        }
+      });
+    }
+  }
+
+  function resolveCourseInfoFromSourceObject(record) {
+    if (!record || typeof record !== "object") {
+      return null;
+    }
+
+    const rawCourseName =
+      record.course_name ||
+      record.courseName ||
+      record.coursename ||
+      record.name ||
+      record.title ||
+      record.course_title ||
+      record.classroom_name ||
+      "";
+    const courseName = normalizeCourseName(rawCourseName);
+
+    if (shouldIgnoreCourseName(courseName)) {
+      return null;
+    }
+
+    const rawClassInfo =
+      record.classroom_name ||
+      record.classroomName ||
+      record.class_name ||
+      record.className ||
+      record.teaching_class ||
+      record.teachingClassName ||
+      "";
+    const classInfo = normalizeClassInfo(rawClassInfo, courseName);
+    const href =
+      normalizePossibleHref(
+        record.href ||
+          record.url ||
+          record.link ||
+          record.path ||
+          record.to ||
+          record.router ||
+          record.course_url ||
+          record.courseUrl ||
+          record.content_url ||
+          record.contentUrl
+      ) ||
+      extractHrefFromText(JSON.stringify(record));
+
+    if (!href && !classInfo && !/课程|概论|英语|物理|数学|体育|政策|算法|导论/.test(courseName)) {
+      return null;
+    }
+
+    return {
+      courseName,
+      classInfo,
+      href
+    };
+  }
+
+  function extractCoursesFromSource(logger) {
+    const roots = [
+      window.__NUXT__,
+      window.__INITIAL_STATE__,
+      window.__PRELOADED_STATE__,
+      window.__NEXT_DATA__,
+      window.__APP_DATA__,
+      window.__PINIA__
+    ].filter(Boolean);
+    const sourceCourses = [];
+
+    roots.forEach((root) => {
+      walkSourceTree(
+        root,
+        (node) => {
+          const course = resolveCourseInfoFromSourceObject(node);
+          if (course) {
+            sourceCourses.push(course);
+          }
+        },
+        { maxNodes: 5000 }
+      );
+    });
+
+    if (!sourceCourses.length) {
+      logger.info("No structured course data found in runtime source objects");
+      return [];
+    }
+
+    const dedupedCourses = uniqueBy(sourceCourses, (item) => getCourseDedupKey(item.courseName));
+    logger.info("Extracted courses from runtime source objects", {
+      count: dedupedCourses.length,
+      withHref: dedupedCourses.filter((item) => item.href).length
+    });
+    return dedupedCourses;
   }
 
   function normalizePossibleHref(value) {
@@ -323,6 +458,8 @@
   }
 
   function extractCoursesFromPage(logger) {
+    const sourceCourses = extractCoursesFromSource(logger);
+
     const root =
       Array.from(document.querySelectorAll("main, section, div")).find((node) => {
         const text = getCleanText(node.textContent);
@@ -359,7 +496,18 @@
       withoutHref: courses.filter((item) => !item.href).length
     });
 
-    return uniqueBy(courses, (item) => getCourseDedupKey(item.courseName));
+    const mergedCourses = uniqueBy(
+      [...sourceCourses, ...courses],
+      (item) => getCourseDedupKey(item.courseName)
+    );
+    logger.info("Merged course extraction summary", {
+      sourceCount: sourceCourses.length,
+      domCount: courses.length,
+      mergedCount: mergedCourses.length,
+      mergedWithHref: mergedCourses.filter((item) => item.href).length
+    });
+
+    return mergedCourses;
   }
 
   function getCourseStatusKey(course) {
