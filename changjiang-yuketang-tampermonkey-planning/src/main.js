@@ -183,6 +183,10 @@
     return text;
   }
 
+  function getCourseDedupKey(courseName) {
+    return getCleanText(courseName).replace(/\s+\d{4}[春秋]$/, "");
+  }
+
   function resolveCourseInfoFromCard(card) {
     const textLines = extractTextLinesFromCard(card);
     if (!textLines.length) {
@@ -239,7 +243,7 @@
 
     logger.debug("Parsed course count", { count: courses.length });
 
-    return uniqueBy(courses, (item) => item.courseName);
+    return uniqueBy(courses, (item) => getCourseDedupKey(item.courseName));
   }
 
   function injectStyles() {
