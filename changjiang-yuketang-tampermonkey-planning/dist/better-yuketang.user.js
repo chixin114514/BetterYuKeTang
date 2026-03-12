@@ -341,6 +341,12 @@
         color: #475569;
       }
 
+      .byt-list-scrollable {
+        max-height: 220px;
+        overflow-y: auto;
+        padding-right: 6px;
+      }
+
       .byt-list li + li {
         margin-top: 4px;
       }
@@ -479,7 +485,7 @@
               ? `
           <section class="byt-section">
             <h3>我听的课</h3>
-            <ul class="byt-list">
+            <ul class="byt-list byt-list-scrollable">
               ${
                 courseSnapshot.courses.length
                   ? courseSnapshot.courses
