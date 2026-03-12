@@ -16,6 +16,10 @@
 
   const VERSION = "0.1.0";
   const STORAGE_KEY = "better-yuketang:settings";
+  const MAX_LOG_ENTRIES = 80;
+  const runtimeState = {
+    logs: []
+  };
 
   function createStorage() {
     const hasGMStorage =
@@ -53,6 +57,18 @@
     const prefix = "[BetterYuKeTang]";
 
     function format(level, message, extra) {
+      const entry = {
+        level,
+        message,
+        extra: typeof extra === "undefined" ? null : extra,
+        timestamp: new Date().toLocaleTimeString("zh-CN", { hour12: false })
+      };
+
+      runtimeState.logs.push(entry);
+      if (runtimeState.logs.length > MAX_LOG_ENTRIES) {
+        runtimeState.logs.shift();
+      }
+
       if (!enabled && level === "debug") {
         return;
       }
@@ -134,6 +150,15 @@
     return "";
   }
 
+  function escapeHtml(value) {
+    return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
   function inferTeacherFromText(text, courseName) {
     const normalizedText = getCleanText(text);
     if (!normalizedText) {
@@ -159,74 +184,90 @@
     return teacherSegment.replace(/^(授课教师|教师|老师|主讲教师|主讲)\s*[:：]?\s*/i, "");
   }
 
-  function extractCoursesFromPage() {
-    const sectionSelectors = [
-      '[class*="course"]',
-      '[class*="Course"]',
-      '[data-name*="course"]',
-      '[data-name*="Course"]'
-    ];
-    const cardSelectors = [
-      '[class*="course-card"]',
-      '[class*="CourseCard"]',
-      '[class*="courseCard"]',
-      '[class*="card"]',
-      'a[href*="/course/"]',
-      'a[href*="/lesson/"]'
-    ];
-    const titleSelectors = [
-      '[class*="course-name"]',
-      '[class*="CourseName"]',
-      '[class*="title"]',
-      '[class*="Title"]',
-      'h3',
-      'h4'
-    ];
-    const teacherSelectors = [
-      '[class*="teacher"]',
-      '[class*="Teacher"]',
-      '[class*="lecturer"]',
-      '[class*="Lecturer"]',
-      '[class*="instructor"]',
-      '[class*="Instructor"]',
-      '[class*="name"]'
-    ];
+  function isVisibleElement(element) {
+    if (!element || !(element instanceof HTMLElement)) {
+      return false;
+    }
 
-    const section = Array.from(document.querySelectorAll("section, div, main")).find((node) => {
-      const text = getCleanText(node.textContent);
-      if (!/我听的课/.test(text)) {
+    const style = window.getComputedStyle(element);
+    if (
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      Number(style.opacity || 1) === 0
+    ) {
+      return false;
+    }
+
+    const rect = element.getBoundingClientRect();
+    return rect.width >= 220 && rect.height >= 100;
+  }
+
+  function extractTextLinesFromCard(card) {
+    return Array.from(card.querySelectorAll("div, span, p, h1, h2, h3, h4, h5, h6"))
+      .map((node) => getCleanText(node.textContent))
+      .filter(Boolean)
+      .filter((text, index, list) => list.indexOf(text) === index)
+      .filter((text) => !/^\.\.\.$|搜索课程|我的课|我的归档$/.test(text));
+  }
+
+  function resolveCourseInfoFromCard(card) {
+    const textLines = extractTextLinesFromCard(card);
+    if (!textLines.length) {
+      return null;
+    }
+
+    const courseName =
+      textLines.find((line) => line.length >= 4 && !/^\d{4}[春秋]-/.test(line)) || textLines[0];
+    const classInfo =
+      textLines.find((line) => line !== courseName && /春|秋|班|学院|专业|临班|\d{4}/.test(line)) ||
+      textLines.find((line) => line !== courseName) ||
+      "";
+    const teacher = inferTeacherFromText(card.textContent, courseName);
+
+    if (!courseName || courseName.length < 2) {
+      return null;
+    }
+
+    return {
+      courseName,
+      classInfo,
+      teacher: teacher || ""
+    };
+  }
+
+  function extractCoursesFromPage(logger) {
+    const root =
+      Array.from(document.querySelectorAll("main, section, div")).find((node) => {
+        const text = getCleanText(node.textContent);
+        return /我的课/.test(text) && !/搜索课程/.test(text);
+      }) || document.body;
+
+    const candidates = Array.from(root.querySelectorAll("a, div, article, li")).filter((element) => {
+      if (!isVisibleElement(element)) {
         return false;
       }
 
-      return sectionSelectors.some((selector) => node.querySelector(selector));
+      const text = getCleanText(element.textContent);
+      if (!text || text.length > 200) {
+        return false;
+      }
+
+      if (/搜索课程|教学管理|我的归档|我的课$/.test(text)) {
+        return false;
+      }
+
+      return /春|秋|班|课程|学院|专业|临班|\d{4}/.test(text);
     });
+    logger.debug("Candidate card count", { count: candidates.length });
 
-    const searchRoot = section || document.body;
-    const cards = uniqueBy(
-      Array.from(searchRoot.querySelectorAll(cardSelectors.join(","))).filter((element) => {
-        const text = getCleanText(element.textContent);
-        return text && /课程|老师|教师|主讲|进入|学习/.test(text);
-      }),
-      (element) => element
-    );
+    const courses = candidates
+      .map((card) => resolveCourseInfoFromCard(card))
+      .filter(Boolean)
+      .filter((item) => item.classInfo || item.teacher);
 
-    const courses = cards
-      .map((card) => {
-        const courseName = findText(card, titleSelectors);
-        const teacher = findText(card, teacherSelectors) || inferTeacherFromText(card.textContent, courseName);
+    logger.debug("Parsed course count", { count: courses.length });
 
-        if (!courseName) {
-          return null;
-        }
-
-        return {
-          courseName,
-          teacher: teacher || "未识别到教师信息"
-        };
-      })
-      .filter(Boolean);
-
-    return uniqueBy(courses, (item) => `${item.courseName}::${item.teacher}`);
+    return uniqueBy(courses, (item) => `${item.courseName}::${item.classInfo}`);
   }
 
   function injectStyles() {
@@ -304,6 +345,46 @@
         margin-top: 4px;
       }
 
+      .byt-meta {
+        display: block;
+        margin-top: 2px;
+        font-size: 12px;
+        color: #64748b;
+      }
+
+      .byt-log-list {
+        margin: 0;
+        padding-left: 0;
+        list-style: none;
+        max-height: 180px;
+        overflow: auto;
+      }
+
+      .byt-log-item {
+        padding: 6px 8px;
+        border-radius: 10px;
+        background: #f8fafc;
+        color: #334155;
+        font-size: 12px;
+      }
+
+      .byt-log-item + .byt-log-item {
+        margin-top: 6px;
+      }
+
+      .byt-log-meta {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 2px;
+        color: #64748b;
+      }
+
+      .byt-log-level {
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
       .byt-actions {
         display: flex;
         gap: 8px;
@@ -350,6 +431,24 @@
       settings.enablePptHelper ? "PPT 辅助" : null,
       settings.enableExportHelper ? "导出辅助" : null
     ].filter(Boolean);
+    const logItems = runtimeState.logs
+      .slice(-12)
+      .reverse()
+      .map((entry) => {
+        const detail =
+          entry.extra === null ? "" : ` ${escapeHtml(JSON.stringify(entry.extra))}`;
+
+        return `
+          <li class="byt-log-item">
+            <div class="byt-log-meta">
+              <span class="byt-log-level">${escapeHtml(entry.level)}</span>
+              <span>${escapeHtml(entry.timestamp)}</span>
+            </div>
+            <div>${escapeHtml(entry.message)}${detail}</div>
+          </li>
+        `;
+      })
+      .join("");
 
     root.innerHTML = `
       <section class="byt-panel">
@@ -386,16 +485,27 @@
                   ? courseSnapshot.courses
                       .map(
                         (item) =>
-                          `<li>${item.courseName} ${item.teacher ? `- ${item.teacher}` : ""}</li>`
+                          `<li>
+                            ${escapeHtml(item.courseName)}
+                            <span class="byt-meta">${escapeHtml(
+                              item.teacher || item.classInfo || "未识别到教师或班级信息"
+                            )}</span>
+                          </li>`
                       )
                       .join("")
-                  : `<li>${courseSnapshot.message}</li>`
+                  : `<li>${escapeHtml(courseSnapshot.message)}</li>`
               }
             </ul>
           </section>
           `
               : ""
           }
+          <section class="byt-section">
+            <h3>运行日志</h3>
+            <ul class="byt-log-list">
+              ${logItems || "<li class=\"byt-log-item\">暂无日志</li>"}
+            </ul>
+          </section>
           <section class="byt-section">
             <h3>下一步接入点</h3>
             <ul class="byt-list">
@@ -458,17 +568,30 @@
 
   function collectPageData(context, logger) {
     if (context.pageType !== "course-list") {
+      logger.info("Skip course collection: current page is not a course list page");
       return { courses: [], message: "当前页面不是课程列表页" };
     }
 
-    const courses = extractCoursesFromPage();
-    logger.info("Collected course snapshot", courses);
+    logger.info("Start collecting course cards from course list page");
+    const courses = extractCoursesFromPage(logger);
+    logger.info("Collected course snapshot", {
+      count: courses.length,
+      courses
+    });
 
     if (!courses.length) {
+      logger.error("No course cards were extracted from the current page");
       return {
         courses,
         message: "暂未识别到“我听的课”列表，可能需要等页面内容加载完成"
       };
+    }
+
+    const missingTeacherCount = courses.filter((item) => !item.teacher).length;
+    if (missingTeacherCount) {
+      logger.info("Teacher info is not visible on the current page cards", {
+        missingTeacherCount
+      });
     }
 
     return {
@@ -481,8 +604,13 @@
     const settings = { ...defaults, ...persistence.get(defaults) };
     const logger = createLogger(settings.debug);
     const context = detectPageContext(window.location.href, document.title);
+    logger.info("Bootstrapping userscript", {
+      url: window.location.href,
+      title: document.title,
+      context,
+      settings
+    });
     const courseSnapshot = collectPageData(context, logger);
-    logger.info("Bootstrapping userscript", { context, settings });
     injectStyles();
     renderPanel({ context, settings, logger, courseSnapshot });
   }
