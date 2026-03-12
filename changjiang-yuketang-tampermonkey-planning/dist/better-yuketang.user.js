@@ -684,14 +684,14 @@
       const nextSettings = { ...settings, debug: !settings.debug };
       persistence.set(nextSettings);
       logger.info("Updated debug setting", nextSettings);
-      start();
+      start({ runInspection: false });
     });
 
     root.querySelector('[data-action="toggle-logs"]').addEventListener("click", () => {
       const nextSettings = { ...settings, showLogs: !settings.showLogs };
       persistence.set(nextSettings);
       logger.info("Updated log visibility", { showLogs: nextSettings.showLogs });
-      start();
+      start({ runInspection: false });
     });
 
     root.querySelector('[data-action="inspect-courses"]').addEventListener("click", () => {
@@ -704,7 +704,7 @@
 
     root.querySelector('[data-action="refresh"]').addEventListener("click", () => {
       logger.info("Manual refresh requested");
-      start();
+      start({ runInspection: false });
     });
   }
 
@@ -792,7 +792,8 @@
     inspectCourses({ courses: courseSnapshot.courses, logger, settings, context });
   }
 
-  function start() {
+  function start(options = {}) {
+    const { runInspection = true } = options;
     const settings = { ...defaults, ...persistence.get(defaults) };
     const logger = createLogger(settings.debug);
     const context = detectPageContext(window.location.href, document.title);
@@ -807,7 +808,7 @@
     injectStyles();
     renderPanel({ context, settings, logger, courseSnapshot });
 
-    if (context.pageType === "course-list" && courseSnapshot.courses.length) {
+    if (runInspection && context.pageType === "course-list" && courseSnapshot.courses.length) {
       inspectCourses({ courses: courseSnapshot.courses, logger, settings, context });
     }
   }
