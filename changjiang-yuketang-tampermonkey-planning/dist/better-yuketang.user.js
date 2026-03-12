@@ -17,6 +17,7 @@
   const VERSION = "0.1.0";
   const STORAGE_KEY = "better-yuketang:settings";
   const MAX_LOG_ENTRIES = 80;
+  const INITIAL_START_DELAY_MS = 5000;
   const runtimeState = {
     logs: [],
     inspectionRunId: 0,
@@ -768,10 +769,16 @@
     }
   }
 
+  function scheduleInitialStart() {
+    window.setTimeout(() => {
+      start();
+    }, INITIAL_START_DELAY_MS);
+  }
+
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", start, { once: true });
+    document.addEventListener("DOMContentLoaded", scheduleInitialStart, { once: true });
   } else {
-    start();
+    scheduleInitialStart();
   }
 
   watchRouteChanges(() => {
