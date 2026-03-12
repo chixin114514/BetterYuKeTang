@@ -203,6 +203,84 @@
     return text;
   }
 
+  function normalizePossibleHref(value) {
+    const text = getCleanText(value);
+    if (!text) {
+      return "";
+    }
+
+    if (/^https?:\/\//i.test(text)) {
+      return text;
+    }
+
+    if (text.startsWith("/")) {
+      return new URL(text, window.location.origin).href;
+    }
+
+    return "";
+  }
+
+  function extractHrefFromText(text) {
+    const value = String(text || "");
+    const match =
+      value.match(/https?:\/\/[^"'\\\s)]+/i) ||
+      value.match(/\/pro\/lms\/[^"'\\\s)]+/i) ||
+      value.match(/\/lms\/[^"'\\\s)]+/i);
+
+    if (!match) {
+      return "";
+    }
+
+    return normalizePossibleHref(match[0]);
+  }
+
+  function collectLinkCandidates(card) {
+    const nodes = [
+      card,
+      card.parentElement,
+      card.closest("[href], [data-href], [data-url], [to], [router-link], [onclick]"),
+      ...Array.from(card.querySelectorAll("[href], [data-href], [data-url], [to], [router-link], [onclick]"))
+    ].filter(Boolean);
+
+    return uniqueBy(nodes, (node) => node);
+  }
+
+  function resolveCourseHref(card) {
+    const linkCandidates = collectLinkCandidates(card);
+
+    for (const node of linkCandidates) {
+      const attributeCandidates = [
+        node.getAttribute && node.getAttribute("href"),
+        node.getAttribute && node.getAttribute("data-href"),
+        node.getAttribute && node.getAttribute("data-url"),
+        node.getAttribute && node.getAttribute("to"),
+        node.getAttribute && node.getAttribute("router-link"),
+        node.getAttribute && node.getAttribute("onclick")
+      ];
+
+      for (const candidate of attributeCandidates) {
+        const href = normalizePossibleHref(candidate) || extractHrefFromText(candidate);
+        if (href) {
+          return href;
+        }
+      }
+    }
+
+    const htmlCandidates = [
+      card.outerHTML,
+      card.parentElement ? card.parentElement.outerHTML : ""
+    ];
+
+    for (const candidate of htmlCandidates) {
+      const href = extractHrefFromText(candidate);
+      if (href) {
+        return href;
+      }
+    }
+
+    return "";
+  }
+
   function resolveCourseInfoFromCard(card) {
     const textLines = extractTextLinesFromCard(card);
     if (!textLines.length) {
@@ -222,11 +300,7 @@
       return null;
     }
 
-    const linkElement =
-      (card.matches("a[href]") ? card : null) ||
-      card.querySelector("a[href]") ||
-      card.closest("a[href]");
-    const href = linkElement ? linkElement.href : "";
+    const href = resolveCourseHref(card);
 
     return {
       courseName,
@@ -266,6 +340,11 @@
       .filter((item) => item.courseName);
 
     logger.debug("Parsed course count", { count: courses.length });
+    logger.info("Course href extraction summary", {
+      total: courses.length,
+      withHref: courses.filter((item) => item.href).length,
+      withoutHref: courses.filter((item) => !item.href).length
+    });
 
     return uniqueBy(courses, (item) => getCourseDedupKey(item.courseName));
   }
