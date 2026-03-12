@@ -187,6 +187,31 @@
     return getCleanText(courseName).replace(/\s+\d{4}[春秋]$/, "");
   }
 
+  function normalizeClassInfo(value, courseName) {
+    const text = getCleanText(value);
+    if (!text) {
+      return "";
+    }
+
+    if (text === courseName) {
+      return "";
+    }
+
+    const normalizedCourseName = getCourseDedupKey(courseName);
+    const collapsedText = text.replace(/\s+/g, "");
+    const collapsedCourseName = normalizedCourseName.replace(/\s+/g, "");
+
+    if (
+      collapsedCourseName &&
+      collapsedText.startsWith(collapsedCourseName) &&
+      /-\S+/.test(text)
+    ) {
+      return "";
+    }
+
+    return text;
+  }
+
   function resolveCourseInfoFromCard(card) {
     const textLines = extractTextLinesFromCard(card);
     if (!textLines.length) {
@@ -196,10 +221,11 @@
     const rawCourseName =
       textLines.find((line) => line.length >= 4 && !/^\d{4}[春秋]-/.test(line)) || textLines[0];
     const courseName = normalizeCourseName(rawCourseName);
-    const classInfo =
+    const rawClassInfo =
       textLines.find((line) => line !== rawCourseName && /春|秋|班|学院|专业|临班|\d{4}/.test(line)) ||
       textLines.find((line) => line !== rawCourseName) ||
       "";
+    const classInfo = normalizeClassInfo(rawClassInfo, courseName);
 
     if (!courseName || courseName.length < 2) {
       return null;
@@ -239,7 +265,7 @@
     const courses = candidates
       .map((card) => resolveCourseInfoFromCard(card))
       .filter(Boolean)
-      .filter((item) => item.classInfo);
+      .filter((item) => item.courseName);
 
     logger.debug("Parsed course count", { count: courses.length });
 
@@ -469,9 +495,11 @@
                         (item) =>
                           `<li>
                             ${escapeHtml(item.courseName)}
-                            <span class="byt-meta">${escapeHtml(
-                              item.classInfo || "未识别到班级信息"
-                            )}</span>
+                            ${
+                              item.classInfo
+                                ? `<span class="byt-meta">${escapeHtml(item.classInfo)}</span>`
+                                : ""
+                            }
                           </li>`
                       )
                       .join("")
