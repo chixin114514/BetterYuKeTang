@@ -358,6 +358,8 @@
   function extractHrefFromText(text) {
     const value = String(text || "");
     const match =
+      value.match(/https?:\/\/[^"'\\\s)]*\/pro\/lms\/[^"'\\\s)]*\/studycontent[^"'\\\s)]*/i) ||
+      value.match(/\/pro\/lms\/[^"'\\\s)]*\/studycontent[^"'\\\s)]*/i) ||
       value.match(/https?:\/\/[^"'\\\s)]+/i) ||
       value.match(/\/pro\/lms\/[^"'\\\s)]+/i) ||
       value.match(/\/lms\/[^"'\\\s)]+/i);
@@ -370,11 +372,25 @@
   }
 
   function collectLinkCandidates(card) {
+    const ancestors = [];
+    let current = card;
+    let depth = 0;
+
+    while (current && depth < 5) {
+      ancestors.push(current);
+      current = current.parentElement;
+      depth += 1;
+    }
+
     const nodes = [
-      card,
-      card.parentElement,
-      card.closest("[href], [data-href], [data-url], [to], [router-link], [onclick]"),
-      ...Array.from(card.querySelectorAll("[href], [data-href], [data-url], [to], [router-link], [onclick]"))
+      ...ancestors,
+      card.closest("[href], [data-href], [data-url], [data-route], [to], [router-link], [onclick]"),
+      ...Array.from(
+        card.querySelectorAll(
+          "[href], [data-href], [data-url], [data-route], [to], [router-link], [onclick]"
+        )
+      ),
+      ...Array.from(card.querySelectorAll("*"))
     ].filter(Boolean);
 
     return uniqueBy(nodes, (node) => node);
@@ -388,9 +404,12 @@
         node.getAttribute && node.getAttribute("href"),
         node.getAttribute && node.getAttribute("data-href"),
         node.getAttribute && node.getAttribute("data-url"),
+        node.getAttribute && node.getAttribute("data-route"),
         node.getAttribute && node.getAttribute("to"),
         node.getAttribute && node.getAttribute("router-link"),
-        node.getAttribute && node.getAttribute("onclick")
+        node.getAttribute && node.getAttribute("onclick"),
+        node.getAttribute && node.getAttribute("data-path"),
+        node.getAttribute && node.getAttribute("data-link")
       ];
 
       for (const candidate of attributeCandidates) {
@@ -403,7 +422,8 @@
 
     const htmlCandidates = [
       card.outerHTML,
-      card.parentElement ? card.parentElement.outerHTML : ""
+      card.parentElement ? card.parentElement.outerHTML : "",
+      card.textContent
     ];
 
     for (const candidate of htmlCandidates) {
